@@ -1,0 +1,24 @@
+[global_config]
+  title_receive_bg_color = "#1f6482"
+  enabled_plugins = TerminalShot, LaunchpadCodeURLHandler, APTURLHandler, Logger, LaunchpadBugURLHandler
+  title_transmit_bg_color = "#1f6482"
+[keybindings]
+  new_tab = <Primary><Shift>t
+[profiles]
+  [[default]]
+    use_system_font = False
+    background_darkness = 0.8
+    background_type = image
+    scroll_background = False
+    font = Monospace 12
+    scrollback_infinite = True
+    use_custom_command = False
+[layouts]
+  [[default]]
+    [[[child1]]]
+      type = Terminal
+      parent = window0
+    [[[window0]]]
+      type = Window
+      parent = ""
+[plugins]
