@@ -45,81 +45,27 @@ class GridEnvironment(gym.Env):
                     self.obstacles.append(obstacle)
                     break
 
-    def step(self, action, episode_number):
+    def step(self, action):
         x, y = self.position
-        hit_wall = False  # 墙壁撞击标志
-        hit_obstacle = False  # 障碍物撞击标志
-
-        # 计算新位置
         if action == 0:   # Up
-            x_new = max(0, x - 1)
-            y_new = y
+            x = max(0, x - 1)
         elif action == 1: # Down
-            x_new = min(self.size - 1, x + 1)
-            y_new = y
+            x = min(self.size - 1, x + 1)
         elif action == 2: # Left
-            x_new = x
-            y_new = max(0, y - 1)
+            y = max(0, y - 1)
         elif action == 3: # Right
-            x_new = x
-            y_new = min(self.size - 1, y + 1)
+            y = min(self.size - 1, y + 1)
 
-        # 检查是否撞墙
-        hit_wall = (x_new, y_new) == (x, y)
+        self.position = (x, y)
 
-        # 检查是否碰到障碍物
-        hit_obstacle = (x_new, y_new) in self.obstacles
-
-        # 更新位置
-        if not hit_wall and not hit_obstacle:
-            self.position = (x_new, y_new)
-
-        # 计算最大可能距离
-        max_distance = np.sqrt((self.size - 1)**2 + (self.size - 1)**2)
-
-        # 计算当前距离并正规化
-        current_distance = np.sqrt((self.goal_position[0] - x_new)**2 + (self.goal_position[1] - y_new)**2)
-        normalized_distance = (current_distance / max_distance) / -1
-        # normalized_distance = (current_distance / max_distance)
-
-        # 根据情节编号调整奖励策略
-        if episode_number < 400:
-            reward = self.calculate_reward_v1(hit_wall, hit_obstacle, normalized_distance)
+        if self.position in self.obstacles:
+            reward = -1  # 碰撞障碍物的惩罚
+            done = True  # 结束情节
         else:
-            reward = self.calculate_reward_v2(hit_wall, hit_obstacle, normalized_distance)
+            done = self.position == self.goal_position
+            reward = 1 if done else -0.1  # 原始奖励机制
 
-        done = self.position == self.goal_position or hit_wall or hit_obstacle
         return self.position, reward, done, {}
-
-
-    def calculate_reward_v1(self, hit_wall, hit_obstacle, normalized_distance):
-        if self.position == self.goal_position:
-            return 1.0  # 成功奖励
-        elif hit_wall or hit_obstacle:
-            return -1.0  # 碰撞惩罚
-        else:
-            # return -0.1  # 步骤惩罚
-            return normalized_distance*0.01  # 距离惩罚
-            # return 0
-
-    def calculate_reward_v2(self, hit_wall, hit_obstacle, normalized_distance):
-        if self.position == self.goal_position:
-            return 1.0  # 成功奖励
-        elif hit_wall or hit_obstacle:
-            return -1.0  # 碰撞惩罚
-        else:
-            # return -0.1  # 步骤惩罚
-            return normalized_distance*0.02  # 距离惩罚
-            # return 0
-        # # 更严格的奖励机制
-        # if self.position == self.goal_position:
-        #     return 1.5
-        # elif hit_wall or hit_obstacle:
-        #     return -1.5
-        # else:
-        #     # return -0.1  # 步骤惩罚
-        #     return normalized_distance*0.02  # 距离惩罚
-
 
     def render(self, mode='human'):
         grid = np.zeros((self.size, self.size))
@@ -204,14 +150,14 @@ class DQNAgent:
 
 
 def environment_interaction(env, data_queue, num_episodes, max_steps):
-    for episode_number in range(num_episodes):
+    for _ in range(num_episodes):
         state = env.reset()
         total_reward = 0  # 初始化奖励为0
         for _ in range(max_steps):
             if not training_active:
                 return  # 终止线程
             action = random.randrange(env.action_space.n)  # 或使用策略选择动作
-            next_state, reward, done, _ = env.step(action, episode_number)
+            next_state, reward, done, _ = env.step(action)
             total_reward += reward  # 更新总奖励
             data_queue.put((state, action, reward, next_state, done, total_reward))
 
