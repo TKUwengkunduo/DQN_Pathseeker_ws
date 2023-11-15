@@ -37,19 +37,42 @@ class GridEnvironment(gym.Env):
 
     def step(self, action):
         x, y = self.position
+        hit_wall = False  # 墙壁撞击标志
+
         if action == 0:   # Up
-            x = max(0, x - 1)
+            if x == 0:
+                hit_wall = True
+            else:
+                x -= 1
         elif action == 1: # Down
-            x = min(self.size - 1, x + 1)
+            if x == self.size - 1:
+                hit_wall = True
+            else:
+                x += 1
         elif action == 2: # Left
-            y = max(0, y - 1)
+            if y == 0:
+                hit_wall = True
+            else:
+                y -= 1
         elif action == 3: # Right
-            y = min(self.size - 1, y + 1)
+            if y == self.size - 1:
+                hit_wall = True
+            else:
+                y += 1
 
         self.position = (x, y)
-
         done = self.position == self.goal_position
-        reward = 1 if done else -0.1  # Reward for reaching the goal, small negative reward otherwise
+
+        # 计算与目标的距离
+        distance = np.sqrt((self.goal_position[0] - x)**2 + (self.goal_position[1] - y)**2)
+
+        # 基于距离、撞墙和步骤计算奖励
+        if done:
+            reward = 1  # 成功到达目标
+        elif hit_wall:
+            reward = -0.5  # 撞墙惩罚
+        else:
+            reward = -0.1 - distance / self.size  # 距离越远，惩罚越大
 
         return self.position, reward, done, {}
 
@@ -160,12 +183,16 @@ def save_model(agent, episode, model_dir='models'):
     """
     保存模型到指定目录
     """
-    print('Model saving')
-    if not os.path.exists(model_dir):
-        os.makedirs(model_dir)
-    model_path = os.path.join(model_dir, f'model.keras')
-    agent.model.save(model_path)
-    print(f'Model saved to {model_path}')
+    try:
+        print('Model saving')
+        if not os.path.exists(model_dir):
+            os.makedirs(model_dir)
+        model_path = os.path.join(model_dir, f'model_{episode}.keras')  # 加入情节编号
+        agent.model.save(model_path)
+        print(f'Model saved to {model_path}')
+    except Exception as e:
+        print(f"Error saving model: {e}")
+
 
 
 if __name__ == "__main__":
@@ -183,7 +210,16 @@ if __name__ == "__main__":
     episodes = 1000
     print("max_steps = ", max_steps)
     batch_size = max_steps
+
     scores = []
+    average_rewards = []  # 平均奖励
+    exploration_rates = []  # 探索率
+    loss_values = []  # 损失值
+    success_rates = []  # 成功率
+    steps_per_episode = []  # 每情节步骤数
+
+    # 创建新窗口和子图
+    plt.figure(figsize=(12, 8))
 
     data_queue = queue.Queue(maxsize=100000)
 
@@ -199,29 +235,63 @@ if __name__ == "__main__":
     for t in training_threads:
         t.start()
 
+
     # 主训练循环
     for e in range(episodes):
         total_reward = 0
+        step_count = 0
         for _ in tqdm(range(max_steps), desc=f"Episode {e+1}/{episodes}"):
             # 从 data_queue 获取数据
             if not data_queue.empty():
                 state, action, reward, next_state, done, episode_reward = data_queue.get()
                 agent.remember(state, action, reward, next_state, done)
                 total_reward = episode_reward  # 更新总奖励
+                step_count += 1
 
                 if done:
                     break
 
         scores.append(total_reward)  # 更新得分
+        steps_per_episode.append(step_count)  # 更新步骤数
+        average_rewards.append(np.mean(scores[-100:]))  # 更新平均奖励
+        exploration_rates.append(agent.epsilon)  # 更新探索率
+        # 更新损失值和成功率（根据您的模型和任务进行调整）
+
         print(f"Episode: {e+1}/{episodes}, Score: {total_reward}, Epsilon: {agent.epsilon:.2f}")
+
+        # 儲存模型
+        if e%100 ==0 and e!=0:
+            save_model(agent, e)
 
         # 每 10 个情节绘制一次得分图
         if e % 10 == 0 and e != 0:
-            plt.plot(scores, color='deepskyblue')
-            plt.xlabel('Episodes')
-            plt.ylabel('Total Reward')
-            plt.title('Agent Training Performance')
-            plt.legend()
+            plt.subplot(241)
+            plt.plot(scores, color='deepskyblue', linewidth=1)
+            plt.title("Total Reward")
+
+            plt.subplot(242)
+            plt.plot(average_rewards, color='green', linewidth=1)
+            plt.title("Average Reward")
+
+            plt.subplot(243)
+            plt.plot(exploration_rates, color='red', linewidth=1)
+            plt.title("Exploration Rate")
+
+            plt.subplot(244)
+            plt.plot(loss_values, color='purple', linewidth=1)
+            plt.title("Loss Value")
+
+            plt.subplot(245)
+            plt.plot(success_rates, color='orange', linewidth=1)
+            plt.title("Success Rate")
+
+            plt.subplot(246)
+            plt.plot(steps_per_episode, color='pink', linewidth=1)
+            plt.title("Steps per Episode")
+
+            # 可以继续添加其他指标的绘制
+
+            plt.tight_layout()
             plt.show(block=False)
             plt.pause(0.1)
 
@@ -231,7 +301,7 @@ if __name__ == "__main__":
     for t in interaction_threads + training_threads:
         t.join()
 
-    save_model(agent, 'DQN')
+    save_model(agent, 'final')
 
 """
 强化学习中的奖励（reward）取值和趋势通常依赖于特定的任务和环境。在DQN（Deep Q-Network）或其他强化学习方法中，并没有一个“正确”的奖励值，但是有一些指标可以帮助判断学习过程是否成功：

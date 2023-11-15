@@ -72,5 +72,5 @@ def test_model(model_path, num_episodes=5, size=5):
                 break
 
 if __name__ == "__main__":
-    model_path = './models/model.keras'  # Update this to your model's path
+    model_path = './models/model_500.keras'  # Update this to your model's path
     test_model(model_path)
