@@ -43,7 +43,8 @@ RUN apt-get update && apt-get install -y \
     rm -rf /var/lib/apt/lists/*
 
 # 安裝opencv與tensorflows
-RUN pip3 install opencv-python tensorflow==2.11.0 matplotlib
+RUN pip3 install opencv-python
+RUN pip3 install tensorflow==2.11.0
 RUN pip3 install matplotlib gym tqdm
 
 # Tensorflow GPU https://www.tensorflow.org/install/source#linux

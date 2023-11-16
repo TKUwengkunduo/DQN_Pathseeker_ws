@@ -1,33 +1,39 @@
-import os
 import numpy as np
-import gym
 from tensorflow.keras.models import load_model
+from GridWorldEnv import GridWorldEnv
+import os
 
-from DNQ_thread import GridEnvironment
+def test_dqn(model_path, env, episodes=100):
+    if not os.path.exists(model_path):
+        raise ValueError(f"Model file not found: {model_path}")
 
-
-def test_model(model_path, num_episodes=100):
-    env = GridEnvironment(size=5)
     model = load_model(model_path)
-    
-    for episode in range(num_episodes):
+
+    total_rewards = []
+    for episode in range(episodes):
         state = env.reset()
-        done = False
+        state = np.reshape(state, [1, env.size, env.size, 1])
         total_reward = 0
-        steps = 0
 
-        while not done:
-            action = np.argmax(model.predict(np.array([state])))
-            next_state, reward, done, _ = env.step(action, episode)
+        while True:
+            action = np.argmax(model.predict(state)[0])
+            next_state, reward, done, _ = env.step(action)
+            next_state = np.reshape(next_state, [1, env.size, env.size, 1])
+
             total_reward += reward
-            steps += 1
             state = next_state
+            env.render()  # 繪製當前狀態
 
-            # 可选：如果要显示环境，取消注释下面的行
-            env.render()
+            if done:
+                break
+        
+        total_rewards.append(total_reward)
+        print(f"Episode: {episode+1}, Total Reward: {total_reward}")
 
-        print(f"Episode: {episode + 1}, Total reward: {total_reward}, Steps: {steps}")
+    avg_reward = sum(total_rewards) / len(total_rewards)
+    print(f"Average Reward over {episodes} episodes: {avg_reward}")
 
 if __name__ == "__main__":
-    model_path = './models/model_400.keras'  # 更改为您的模型路径
-    test_model(model_path)
+    env = GridWorldEnv(size=10)
+    model_path = 'models/model_160.keras'  # Replace with your model path
+    test_dqn(model_path, env)

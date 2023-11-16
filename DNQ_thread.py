@@ -5,6 +5,7 @@ import gym
 from collections import deque
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, Flatten, MaxPooling2D
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.optimizers import Adam
 import matplotlib.pyplot as plt
@@ -21,6 +22,9 @@ training_active = True
 
 
 class GridEnvironment(gym.Env):
+    """==============================
+    " 初始化環境
+    =============================="""
     def __init__(self, size=5, obstacle_range=(1, 5)):
         super(GridEnvironment, self).__init__()
         self.size = size
@@ -29,6 +33,7 @@ class GridEnvironment(gym.Env):
         self.goal_position = (size - 1, size - 1)
         self.obstacle_range = obstacle_range  # 障碍物数量范围
         self.obstacles = []
+        self.explored_positions = set() # 儲存以探索位置
 
     def reset(self):
         self.position = (0, 0)
@@ -70,6 +75,11 @@ class GridEnvironment(gym.Env):
         # 检查是否碰到障碍物
         hit_obstacle = (x_new, y_new) in self.obstacles
 
+        # 檢查是否為新位置
+        is_new_position = self.position not in self.explored_positions
+        if is_new_position:
+            self.explored_positions.add(self.position)
+
         # 更新位置
         if not hit_wall and not hit_obstacle:
             self.position = (x_new, y_new)
@@ -79,46 +89,68 @@ class GridEnvironment(gym.Env):
 
         # 计算当前距离并正规化
         current_distance = np.sqrt((self.goal_position[0] - x_new)**2 + (self.goal_position[1] - y_new)**2)
-        normalized_distance = (current_distance / max_distance) / -1
-        # normalized_distance = (current_distance / max_distance)
+        nor_distance_neg = (current_distance / max_distance) / -1
+        nor_distance_pos = 1/(current_distance / max_distance)
 
         # 根据情节编号调整奖励策略
         if episode_number < 400:
-            reward = self.calculate_reward_v1(hit_wall, hit_obstacle, normalized_distance)
+            reward = self.calculate_reward_v1(hit_wall, hit_obstacle, nor_distance_pos, nor_distance_neg, is_new_position)
+        elif episode_number < 600:
+            reward = self.calculate_reward_v2(hit_wall, hit_obstacle, nor_distance_pos, nor_distance_neg, is_new_position)
         else:
-            reward = self.calculate_reward_v2(hit_wall, hit_obstacle, normalized_distance)
+            reward = self.calculate_reward_v3(hit_wall, hit_obstacle, nor_distance_pos, nor_distance_neg, is_new_position)
 
         done = self.position == self.goal_position or hit_wall or hit_obstacle
         return self.position, reward, done, {}
 
 
-    def calculate_reward_v1(self, hit_wall, hit_obstacle, normalized_distance):
+    def calculate_reward_v1(self, hit_wall, hit_obstacle, nor_distance_pos, nor_distance_neg, is_new_position):
+        exploration_reward = 10  # 探索新位置的獎勵
         if self.position == self.goal_position:
-            return 1.0  # 成功奖励
+            return 100.0  # 成功獎勵
         elif hit_wall or hit_obstacle:
-            return -1.0  # 碰撞惩罚
+            return -100.0  # 碰撞懲罰
         else:
-            # return -0.1  # 步骤惩罚
-            return normalized_distance*0.01  # 距离惩罚
-            # return 0
+            reward = 0
+            if nor_distance_pos > 0.5:      reward = nor_distance_neg*10
+            elif nor_distance_neg == 0:     reward = 100
+            else:                           reward = nor_distance_pos*10
 
-    def calculate_reward_v2(self, hit_wall, hit_obstacle, normalized_distance):
+            if is_new_position:             reward += exploration_reward    # 如果是新位置，增加探索獎勵
+            
+            return reward
+
+    def calculate_reward_v2(self, hit_wall, hit_obstacle, nor_distance_pos, nor_distance_neg, is_new_position):
+        exploration_reward = 5  # 探索新位置的獎勵
         if self.position == self.goal_position:
-            return 1.0  # 成功奖励
+            return 100.0  # 成功獎勵
         elif hit_wall or hit_obstacle:
-            return -1.0  # 碰撞惩罚
+            return -100.0  # 碰撞懲罰
         else:
-            # return -0.1  # 步骤惩罚
-            return normalized_distance*0.02  # 距离惩罚
-            # return 0
-        # # 更严格的奖励机制
-        # if self.position == self.goal_position:
-        #     return 1.5
-        # elif hit_wall or hit_obstacle:
-        #     return -1.5
-        # else:
-        #     # return -0.1  # 步骤惩罚
-        #     return normalized_distance*0.02  # 距离惩罚
+            reward = 0
+            if nor_distance_pos > 0.5:      reward = nor_distance_neg*10
+            elif nor_distance_neg == 0:     reward = 100
+            else:                           reward = nor_distance_pos*10
+
+            if is_new_position:             reward += exploration_reward    # 如果是新位置，增加探索獎勵
+            
+            return reward
+    
+    def calculate_reward_v3(self, hit_wall, hit_obstacle, nor_distance_pos, nor_distance_neg, is_new_position):
+        exploration_reward = 0  # 探索新位置的獎勵
+        if self.position == self.goal_position:
+            return 100.0  # 成功獎勵
+        elif hit_wall or hit_obstacle:
+            return -100.0  # 碰撞懲罰
+        else:
+            reward = 0
+            if nor_distance_pos > 0.5:      reward = nor_distance_neg*10
+            elif nor_distance_neg == 0:     reward = 100
+            else:                           reward = nor_distance_pos*10
+
+            if is_new_position:             reward += exploration_reward    # 如果是新位置，增加探索獎勵
+            
+            return reward
 
 
     def render(self, mode='human'):
@@ -135,41 +167,51 @@ class GridEnvironment(gym.Env):
             plt.show(block=False)
             plt.pause(0.1)
             plt.clf()
+        return self
 
     def get_max_steps(self):
         return self.size * self.size * 2
+    
+    def get_grid_state(self):
+        # 機器人位置(2), 終點(1), 障礙物(-1)
+
+        grid = np.zeros((self.size, self.size)) # 创建一个全零的二维数组
+        grid[self.position] = 2             # 标记智能体位置
+        grid[self.goal_position] = 1        # 标记目标位置 # 用1表示目标位置
+
+        # 标记障碍物位置 # 用-1表示障碍物
+        for obs in self.obstacles:
+            grid[obs] = -1  
+
+        return grid
 
 
 class DQNAgent:
-    def __init__(self, state_size, action_size, max_memory_size=2000):
+    def __init__(self, state_size, action_size, size, max_memory_size=2000, history_length=10):
         self.state_size = state_size
         self.action_size = action_size
+        self.size = size  # 添加 size 属性
         self.memory = deque(maxlen=max_memory_size)
         self.gamma = 0.95  # discount rate
-        self.epsilon = 1.0  # exploration rate
+        self.epsilon = 0.8  # exploration rate (1.0)
         self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
+        self.epsilon_decay = 0.999
         self.learning_rate = 0.001
         self.learning_rate_decay = 0.999
         self.learning_rate_min = 0.0001
         self.model = self._build_model()
-
-    # def _build_model(self):
-    #     model = Sequential()
-    #     model.add(Dense(24, input_dim=self.state_size, activation='relu'))
-    #     model.add(Dense(24, activation='relu'))
-    #     model.add(Dense(self.action_size, activation='linear'))
-    #     model.compile(loss='mse', optimizer=Adam(lr=self.learning_rate))
-    #     return model
-
-
+        self.history = deque(maxlen=history_length)  # 存储最近的状态转换
+        self.episode_count = 0  # 新增情节计数器
+    
     def _build_model(self):
         model = Sequential()
-        model.add(Dense(24, input_dim=self.state_size, activation='relu'))
-        model.add(Dense(24, activation='relu'))
-        model.add(Dense(24, activation='relu'))  # 添加額外的隱藏層
+        model.add(Conv2D(64, kernel_size=(3, 3), activation='relu', input_shape=(self.size, self.size, 1)))
+        model.add(Conv2D(128, kernel_size=(3, 3), activation='relu'))
+        model.add(Flatten())
+        model.add(Dense(64, activation='relu'))
+        model.add(Dense(32, activation='relu'))
         model.add(Dense(self.action_size, activation='linear'))
-        model.compile(loss='mse', optimizer=Adam(lr=0.0005))  # 調整學習率
+        model.compile(loss='mse', optimizer=Adam(lr=self.learning_rate))
         return model
 
     def update_parameters(self):
@@ -178,29 +220,52 @@ class DQNAgent:
         # 更新学习率
         self.learning_rate = max(self.learning_rate_min, self.learning_rate * self.learning_rate_decay)
         # 更新模型的学习率
-        self.model.optimizer.lr.assign(self.learning_rate)
+        self.model.optimizer.learning_rate = self.learning_rate
 
 
     def remember(self, state, action, reward, next_state, done):
-        self.memory.append((state, action, reward, next_state, done))
+        if self.is_valid_transition(state, action, reward, next_state, done):
+            self.memory.append((state, action, reward, next_state, done))
+    
+    def is_valid_transition(self, state, action, reward, next_state, done):
+        # 确保状态确实因为行动而发生了变化
+        if state == next_state:
+            return False
+        # 避免循环行为
+        elif self.is_cyclic_transition(state, next_state):
+            return False
+        else:
+            return True
+
+    def is_cyclic_transition(self, state, next_state):
+        # 检查当前转换是否与历史中的转换重复
+        current_transition = (state, next_state)
+        if current_transition in self.history:
+            return True  # 如果当前转换已在历史中，认为是循环
+        self.history.append(current_transition)  # 更新历史
+        return False
 
     def act(self, state):
+        # 将状态转换为适合 CNN 输入的格式
+        grid_state = state.get_grid_state()[np.newaxis, :, :, np.newaxis]
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
-        act_values = self.model.predict(np.array([state]))
+        act_values = self.model.predict(grid_state)
         return np.argmax(act_values[0])
 
     def replay(self, batch_size):
         minibatch = random.sample(self.memory, batch_size)
         for state, action, reward, next_state, done in minibatch:
+            state_grid = state.get_grid_state()[np.newaxis, :, :, np.newaxis]
+            next_state_grid = next_state.get_grid_state()[np.newaxis, :, :, np.newaxis]
+
             target = reward
             if not done:
-                target = reward + self.gamma * np.amax(self.model.predict(np.array([next_state]))[0])
-            target_f = self.model.predict(np.array([state]))
+                target = reward + self.gamma * np.amax(self.model.predict(next_state_grid)[0])
+            target_f = self.model.predict(state_grid)
             target_f[0][action] = target
-            self.model.fit(np.array([state]), target_f, epochs=1, verbose=0)
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
+
+            self.model.fit(state_grid, target_f, epochs=1, verbose=0)
 
 
 def environment_interaction(env, data_queue, num_episodes, max_steps):
@@ -222,18 +287,17 @@ def environment_interaction(env, data_queue, num_episodes, max_steps):
 
 
 def model_training(agent, data_queue, batch_size):
-    while True:
-        if not training_active:
-            return  # 终止线程
+    while training_active:
         if not data_queue.empty():
-            minibatch = [data_queue.get() for _ in range(batch_size)]
+            minibatch = [data_queue.get() for _ in range(min(batch_size, data_queue.qsize()))]
             for state, action, reward, next_state, done, _ in minibatch:
-                target = reward
-                if not done:
-                    target = reward + agent.gamma * np.amax(agent.model.predict(np.array([next_state]))[0])
-                target_f = agent.model.predict(np.array([state]))
-                target_f[0][action] = target
-                agent.model.fit(np.array([state]), target_f, epochs=1, verbose=0)
+                print("remember")
+                agent.remember(state, action, reward, next_state, done)
+            if len(agent.memory) > batch_size:
+                agent.replay(batch_size)
+                print("train")
+
+
 
 
 def save_model(agent, episode, model_dir='models'):
@@ -260,12 +324,13 @@ if __name__ == "__main__":
     env = GridEnvironment(size=5)
     state_size = env.state_size
     action_size = env.action_space.n
-    agent = DQNAgent(state_size, action_size)
+    grid_size = env.size  # 获取环境的 size 属性
+    agent = DQNAgent(state_size, action_size, grid_size)  # 传递 size 给 DQNAgent
 
     max_steps = env.get_max_steps()
-    episodes = 1000
+    episodes = 2000
     print("max_steps = ", max_steps)
-    batch_size = max_steps*5
+    batch_size = 128  # 一般情况下的标准批量大小
 
     scores = []
     average_rewards = []  # 平均奖励
@@ -277,7 +342,7 @@ if __name__ == "__main__":
     # 创建新窗口和子图
     plt.figure(figsize=(12, 8))
 
-    data_queue = queue.Queue(maxsize=100000)
+    data_queue = queue.Queue(maxsize=1000000)
 
     # 创建和启动环境交互线程
     num_interaction_threads = 4
@@ -286,7 +351,7 @@ if __name__ == "__main__":
         t.start()
 
     # 创建和启动模型训练线程
-    num_training_threads = 4
+    num_training_threads = 2  # 通常情况下，训练线程少于交互线程
     training_threads = [threading.Thread(target=model_training, args=(agent, data_queue, batch_size)) for _ in range(num_training_threads)]
     for t in training_threads:
         t.start()
@@ -297,26 +362,29 @@ if __name__ == "__main__":
         step_count = 0
         successful_episode = False  # 用于记录情节是否成功
 
-        agent.update_parameters()  # 更新 DQNAgent 参数
+        # agent.update_parameters()  # 更新 DQNAgent 参数
 
-        # 儲存模型
-        if e%100 ==0 and e!=0:
+        # 储存模型
+        if e % 100 == 0 and e != 0:
             save_model(agent, e)
 
         # 更新经验回放缓冲区大小
-        if e % 100 == 0 and e != 0:
-            agent.memory = deque(maxlen=min(5000, agent.memory.maxlen + 500))
+        if e % 200 == 0 and e != 0:
+            agent.memory = deque(maxlen=min(10000, agent.memory.maxlen + 1000))
 
-        for _ in tqdm(range(max_steps), desc=f"Episode {e+1}/{episodes}"):
-            if not data_queue.empty():
-                state, action, reward, next_state, done, episode_reward = data_queue.get()
-                agent.remember(state, action, reward, next_state, done)
-                total_reward = episode_reward  # 更新总奖励
-                step_count += 1
+        # for _ in tqdm(range(max_steps), desc=f"Episode {e+1}/{episodes}"):
+        #     if not data_queue.empty():
+        #         state, action, reward, next_state, done, episode_reward = data_queue.get()
+        #         # agent.remember(state, action, reward, next_state, done)
+        #         total_reward = episode_reward  # 更新总奖励
+        #         step_count += 1
 
-                if done:
-                    successful_episode = reward > 0  # 根据奖励判断是否成功
-                    break
+        #         if done:
+        #             successful_episode = reward > 0  # 根据奖励判断是否成功
+        #             break
+        # while not data_queue.empty():
+        #     state, action, reward, next_state, done, episode_reward = data_queue.get()
+        #     print(f"State: {state}, Action: {action}, Reward: {reward}, Next State: {next_state}, Done: {done}, Episode Reward: {episode_reward}")
 
         scores.append(total_reward)  # 更新得分
         steps_per_episode.append(step_count)  # 更新步骤数
@@ -363,3 +431,7 @@ if __name__ == "__main__":
         t.join()
 
     save_model(agent, 'final')
+
+        
+
+
